@@ -1,0 +1,18 @@
+{
+  "name": "sewww_bot",
+  "version": "0.0.0",
+  "description": "A web crawler for the SeWWW search engine.",
+  "main": "crawl.mjs",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "search",
+    "webcrawler",
+    "web",
+    "bot",
+    "crawler"
+  ],
+  "author": "Dušan Till",
+  "license": "GPL-3.0-or-later"
+}
