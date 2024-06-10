@@ -51,20 +51,24 @@ function matchRobots(glob, str) {
 
 function getRobotsRules(productToken, robots) {
     let result = {
-	allow: [],
-	disallow: [],
-	sitemap: ""
+		allow: [],
+		disallow: [],
+		sitemaps: []
     };
     
     for (const agent in robots) {
 	if (matchRobots(agent, productToken)) {
+		if (agent === "sitemaps") {
+			continue;
+		}
+		
 	    for (const allowUrl of robots[agent].allow) {
-		result.allow.push(allowUrl);
+			result.allow.push(allowUrl);
 	    }
 	    for (const disallowUrl of robots[agent].disallow) {
-		result.disallow.push(disallowUrl);
+			result.disallow.push(disallowUrl);
 	    }
-	    result.sitemap = robots[agent].sitemap;
+	    result.sitemaps = robots.sitemaps;
 	}
     }
 
@@ -73,58 +77,54 @@ function getRobotsRules(productToken, robots) {
 
 function parseRobots(robots) {
     robots = robots.split("\n");
-    let result = {  };
+    let result = { sitemaps: [] };
 
     const record = (line, name) => line.toLowerCase().startsWith(`${name}:`);
 
     let currentUserAgents = [];
     for (let line of robots) {
-	if (line.indexOf("#") != -1) {
-	    line = line.substring(0, line.indexOf("#"));
-	}
-
-	if (line.trim() === "") {
-	    currentUserAgents = [];
-	    continue;
-	} else if (record(line, "user-agent")) {
-	    currentUserAgents.push(line.substring(12));
-
-	    for (const currentUserAgent of currentUserAgents) {
-		if (typeof result[currentUserAgent] !== "object" ||
-		    !result[currentUserAgent].allow instanceof Array ||
-		    !result[currentUserAgent].disallow instanceof Array ||
-		    typeof result[currentUserAgent].sitemap !== "string") {
-		    result[currentUserAgent] = {
-			allow: [],
-			disallow: [],
-			sitemap: ""
-		    };
+		if (line.indexOf("#") != -1) {
+			line = line.substring(0, line.indexOf("#"));
 		}
-	    }
-	    
-	    continue;
-	}
 
-	// Make sure to handle any errors
-	if (currentUserAgents == undefined || currentUserAgents == []) {
-	    continue;
-	}
+		if (line.trim() === "") {
+			currentUserAgents = [];
+			continue;
+		} else if (record(line, "user-agent")) {
+			currentUserAgents.push(line.substring(12));
 
-	if (record(line, "allow")) {
-	    for (const currentUserAgent of currentUserAgents) {
-		result[currentUserAgent].allow.push(line.substring(6).trim());
-	    }
-	} else if (record(line, "disallow")) {
-	    for (const currentUserAgent of currentUserAgents) {
-		result[currentUserAgent].disallow.push(line.substring(9).trim());
-	    }
-	} else if (record(line, "sitemap")) {
-	    for (const currentUserAgent of currentUserAgents) {
-		result[currentUserAgent].sitemap = line.substring(8).trim();
-	    }
-	}
+			for (const currentUserAgent of currentUserAgents) {
+			if (typeof result[currentUserAgent] !== "object" ||
+				!result[currentUserAgent].allow instanceof Array ||
+				!result[currentUserAgent].disallow instanceof Array) {
+				result[currentUserAgent] = {
+					allow: [],
+					disallow: []
+				};
+			}
+			}
+			
+			continue;
+		}
 
-	continue;
+		// Make sure to handle any errors
+		if (currentUserAgents == undefined || currentUserAgents == []) {
+			continue;
+		}
+
+		if (record(line, "allow")) {
+			for (const currentUserAgent of currentUserAgents) {
+				result[currentUserAgent].allow.push(line.substring(6).trim());
+			}
+		} else if (record(line, "disallow")) {
+			for (const currentUserAgent of currentUserAgents) {
+				result[currentUserAgent].disallow.push(line.substring(9).trim());
+			}
+		} else if (record(line, "sitemap")) {
+			result.sitemaps.push(line.substring(8).trim());
+		}
+
+		continue;
     }
 
     return result;
@@ -134,32 +134,32 @@ async function getRobots(baseUrl) {
     const url = new URL("/robots.txt", baseUrl);
 
     try {
-	const headers = new Headers(globalHeaders);
-	const options = {
-	    headers: headers
-	};
+		const headers = new Headers(globalHeaders);
+		const options = {
+			headers: headers
+		};
 	
-	const res = await fetch('https://gnu.org/robots.txt', options);
+		const res = await fetch('https://gnu.org/robots.txt', options);
 
-	if (res.status >= 400 && res.status < 499) {
-	    return {
-		"*": {
-		    allow: [ "*" ]
+		if (res.status >= 400 && res.status < 499) {
+			return {
+			"*": {
+				allow: [ "*" ]
+			}
+			};
+		} else if (res.status >= 500 && res.status < 599) {
+			return {
+			"*": {
+				disallow: [ "*" ]
+			}
+			};
 		}
-	    };
-	} else if (res.status >= 500 && res.status < 599) {
-	    return {
-		"*": {
-		    disallow: [ "*" ]
-		}
-	    };
-	}
-	
-	const robots = await res.text();
+		
+		const robots = await res.text();
 
-	return parseRobots(robots);
+		return parseRobots(robots);
     } catch (err) {
-	throw err;
+		throw err;
     }
 }
 
