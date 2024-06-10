@@ -1,6 +1,5 @@
 'use strict';
 
-import { URL } from "node:url";
 import { getRobotsRules, getRobots } from './robots.mjs';
 import { config } from './global.mjs';
 

@@ -1,5 +1,6 @@
 'use strict';
 
+import { URL } from 'node:url';
 import { globalHeaders } from './global.mjs';
 
 function matchRobots(glob, str) {
