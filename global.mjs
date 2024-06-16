@@ -7,7 +7,11 @@ const config = {
     },
     bot: {
 	productToken: "SeWWW_Bot",
-	version: "0.0.0"
+	version: "0.0.0",
+	crawlStart: [
+	    "https://www.gnu.org",
+	    "https://www.fsf.org"
+	]
     }
 };
 

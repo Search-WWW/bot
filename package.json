@@ -14,5 +14,8 @@
     "crawler"
   ],
   "author": "Dušan Till",
-  "license": "GPL-3.0-or-later"
+  "license": "GPL-3.0-or-later",
+  "dependencies": {
+    "fast-xml-parser": "^4.4.0"
+  }
 }
