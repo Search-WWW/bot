@@ -46,29 +46,29 @@ function getTag(tags, data) {
     let result = {};
 
     for (let tag of tags) {
-	result[tag] = [];
+		result[tag] = [];
 
-	if ((data[tag] ?? []).length > 0) {
-	    for (let value of data[tag]) {
-		result[tag].push(value);
-	    }
-	}
+		if (((data ?? {})[tag] ?? []).length > 0) {
+			for (let value of data[tag]) {
+				result[tag].push(value);
+			}
+		}
     }
 
     for (let elems in data) {
-	if (elems.startsWith("@_") || elems === "#text" || elems === "script" || elems === "style") continue;
-	for (let elem of data[elems]) {
-	    try {
-		const addRes = getTag(tags, elem);
-		for (let tag of tags) {
-		    for (let i of addRes[tag]) {
-			result[tag].push(i);
-		    }
+		if (elems.startsWith("@_") || elems === "#text" || elems === "script" || elems === "style" || elems === "hr" || elems === "br") continue;
+		for (let elem of data[elems]) {
+			try {
+				const addRes = getTag(tags, elem);
+				for (let tag of tags) {
+					for (let i of addRes[tag]) {
+						result[tag].push(i);
+					}
+				}
+			} catch (err) {
+				console.error(err.message);
+			}
 		}
-	    } catch (err) {
-		console.error(err.message);
-	    }
-	}
     }
 
     return result;
@@ -82,250 +82,253 @@ while (crawlQueue.length > 0) {
     
     let info;
     try {
-	info = await getInfo(site);
+		info = await getInfo(site);
     } catch (err) {
-	console.error(err.message);
-	failed.push(site);
-	continue;
+		console.error(err.message);
+		failed.push(site);
+		continue;
     }
 
     let isDisallowed = false;
     for (let disallowedSite of info.disallow) {
-	if (!matchRobots(disallowedSite, site)) continue;
+		if (!matchRobots(disallowedSite, site)) continue;
 
-	let isAllowed = false;
-	for (let allowedSite of info.allow) {
-	    if (matchRobots(allowedSite, site) && allowedSite.length > disallowedSite.length) {
-		isAllowed = true;
-		break;
-	    };
-	}
+		let isAllowed = false;
+		for (let allowedSite of info.allow) {
+			if (matchRobots(allowedSite, site) && allowedSite.length > disallowedSite.length) {
+			isAllowed = true;
+			break;
+			};
+		}
 
-	if (!isAllowed) isDisallowed = true;
-	else isDisallowed = false;
+		if (!isAllowed) isDisallowed = true;
+		else isDisallowed = false;
     }
 
     if (isDisallowed) continue;
 
     let res;
     try {
-	res = await fetch(site, fetchOptions);
-	
-	if (!res.ok) throw new Error(`HTTP Error ${res.status}: ${res.statusText}`);
-	
-	const contentType = httpHeaderParse(res.headers.get("Content-Type") ?? "");
-	if (contentType[contentType.length - 1][0] !== "text/html") {
-	    console.error("A non-HTML document");
-	    failed.push(site);
-	    continue;
-	};
+		res = await fetch(site, fetchOptions);
+		
+		if (!res.ok) throw new Error(`HTTP Error ${res.status}: ${res.statusText}`);
+		
+		const contentType = httpHeaderParse(res.headers.get("Content-Type") ?? "");
+		if (contentType[contentType.length - 1][0] !== "text/html") {
+			console.error("A non-HTML document");
+			failed.push(site);
+			continue;
+		};
     } catch (err) {
-	console.error(err.message);
-	failed.push(site);
-	continue;
+		console.error(err.message);
+		failed.push(site);
+		continue;
     }
 
     let content;
     try {
-	content = parser.parse(await res.text());
+		content = parser.parse(await res.text());
     } catch (err) {
-	console.error(err.message);
-	failed.push(site);
-	continue;
+		console.error(err.message);
+		failed.push(site);
+		continue;
     }
 
     let metadata = {
-	title: "",
-	description: "",
-	icon: "",
-	image: "",
-	keywords: [],
-	license: "",
-	privacyPolicy: "",
-	termsOfService: "",
-	publisher: "",
-	author: {
-	    name: "",
-	    link: ""
-	},
-	creators: [],
-	language: "",
-	words: []
+		title: "",
+		description: "",
+		icon: "",
+		image: "",
+		keywords: [],
+		license: "",
+		privacyPolicy: "",
+		termsOfService: "",
+		publisher: "",
+		author: {
+			name: "",
+			link: ""
+		},
+		creators: [],
+		language: "",
+		text: ""
     };
 
     let index = true;
     let follow = true;
 
     if (content.html !== undefined) {
-	if (content.html.head !== undefined) {
-	    metadata.title = (content.html.head.title ?? {"#text": ""})["#text"] ?? "";
-	    for (let meta of content.html.head.meta ?? []) {
-		const name = (meta["@_name"] ?? "").toString().toLowerCase();
-		const content = (meta["@_content"] ?? "").toString();
-		
-		switch (name) {
-		case 'author':
-		    metadata.author.name = content;
-		    break;
-		case 'description':
-		    metadata.description = content;
-		    break;
-		case 'keywords':
-		    for (let keyword of content.split(",")) {
-			metadata.keywords.push(keyword.trim());
-		    }
-		    break;
-		case 'creator':
-		    metadata.creator.push(content);
-		    break;
-		case 'publisher':
-		    metadata.publisher = content;
-		    break;
-		case 'robots':
-		    for (let value of content.split(",")) {
-			switch (value.trim().toLowerCase()) {
-			case 'index':
-			    index = true;
-			    break;
-			case 'noindex':
-			    index = false;
-			    break;
-			case 'follow':
-			    follow = true;
-			    break;
-			case 'nofollow':
-			    follow = false;
-			    break;
-			case 'all':
-			    index = true;
-			    follow = true;
-			    break;
-			case 'none':
-			    index = false;
-			    follow = false;
-			    break;
-			default:
-			    break;
+		if (content.html.head !== undefined) {
+			metadata.title = (content.html.head.title ?? {"#text": ""})["#text"] ?? "";
+			for (let meta of content.html.head.meta ?? []) {
+				const name = (meta["@_name"] ?? "").toString().toLowerCase();
+				const content = (meta["@_content"] ?? "").toString();
+				
+				switch (name) {
+					case 'author':
+						metadata.author.name = content;
+						break;
+					case 'description':
+						metadata.description = content;
+						break;
+					case 'keywords':
+						for (let keyword of content.split(",")) {
+						metadata.keywords.push(keyword.trim());
+						}
+						break;
+					case 'creator':
+						metadata.creator.push(content);
+						break;
+					case 'publisher':
+						metadata.publisher = content;
+						break;
+					case 'robots':
+						for (let value of content.split(",")) {
+							switch (value.trim().toLowerCase()) {
+								case 'index':
+									index = true;
+									break;
+								case 'noindex':
+									index = false;
+									break;
+								case 'follow':
+									follow = true;
+									break;
+								case 'nofollow':
+									follow = false;
+									break;
+								case 'all':
+									index = true;
+									follow = true;
+									break;
+								case 'none':
+									index = false;
+									follow = false;
+									break;
+								default:
+									break;
+							}
+						}
+						break;
+					default:
+						break;
+				}
 			}
-		    }
-		    break;
-		default:
-		    break;
+			if (!index) continue;
+			for (let link of content.html.head.link ?? []) {
+				const name = (link["@_rel"] ?? "").toString().trim().toLowerCase();
+				const content = (link["@_href"] ?? "").toString();
+				
+				switch (name) {
+					case 'made':
+						// pass
+					case 'author':
+						metadata.author.link = content;
+						break;
+					case 'icon':
+						metadata.icon = (new URL(content, site)).href;
+						break;
+					case 'license':
+						metadata.license = content;
+						break;
+					case 'privacy-policy':
+						metadata.privacyPolicy = content;
+						break;
+					case 'terms-of-service':
+						metadata.termsOfService = content;
+						break;
+					case 'img_src':
+						metadata.image = (new URL(content, site)).href;
+						break;
+					default:
+						break;
+				}
+			}
 		}
-	    }
-	    if (!index) continue;
-	    for (let link of content.html.head.link ?? []) {
-		const name = (link["@_rel"] ?? "").toString().trim().toLowerCase();
-		const content = (link["@_href"] ?? "").toString();
-		
-		switch (name) {
-		case 'made':
-		    // pass
-		case 'author':
-		    metadata.author.link = content;
-		    break;
-		case 'icon':
-		    metadata.icon = (new URL(content, site)).href;
-		    break;
-		case 'license':
-		    metadata.license = content;
-		    break;
-		case 'privacy-policy':
-		    metadata.privacyPolicy = content;
-		    break;
-		case 'terms-of-service':
-		    metadata.termsOfService = content;
-		    break;
-		case 'img_src':
-		    metadata.image = (new URL(content, site)).href;
-		    break;
-		default:
-		    break;
-		}
-	    }
-	}
-	metadata.language = content.html["@_lang"];
+		metadata.language = content.html["@_lang"];
 
-	if (content.html.body !== undefined) {
-	    for (let link of getTag("a", content.html.body).a ?? []) {
-		const linkUrl = new URL(link["@_href"], site);
-		
-		let skip = false;
-		
-		for (let rel of (link["@_rel"] ?? "").split(" ")) {
-		    switch (rel.trim().toLowerCase()) {
-		    case 'nofollow':
-			skip = true;
-			break;
-		    default:
-			break;
-		    }
-		}
+		if (content.html.body !== undefined) {
+			for (let link of getTag("a", content.html.body).a ?? []) {
+				const linkUrl = new URL(link["@_href"], site);
+				
+				let skip = false;
+				
+				for (let rel of (link["@_rel"] ?? "").split(" ")) {
+					switch (rel.trim().toLowerCase()) {
+					case 'nofollow':
+					skip = true;
+					break;
+					default:
+					break;
+					}
+				}
 
-		if (linkUrl.protocol !== "https:" && linkUrl.protocol !== "http:") continue;
+				if (linkUrl.protocol !== "https:" && linkUrl.protocol !== "http:") continue;
 
-		for (let futLink of crawlQueue) {
-		    const futLinkUrl = new URL(futLink);
-		    if (futLinkUrl.origin === linkUrl.origin && futLinkUrl.pathname === linkUrl.pathname) {
-			skip = true;
-			break;
-		    }
-		}
-		for (let exLink in crawled) {
-		    const exLinkUrl = new URL(exLink);
-		    if (exLinkUrl.origin === linkUrl.origin && exLinkUrl.pathname === linkUrl.pathname) {
-			skip = true;
-			break;
-		    }
-		}
-		for (let failLink of failed) {
-		    const failLinkUrl = new URL(failLink);
-		    if (failLinkUrl.origin === linkUrl.origin && failLinkUrl.pathname === linkUrl.pathname) {
-			skip = true;
-			break;
-		    }
-		}
-		
-		if (skip) continue;
+				for (let futLink of crawlQueue) {
+					const futLinkUrl = new URL(futLink);
+					if (futLinkUrl.origin === linkUrl.origin && futLinkUrl.pathname === linkUrl.pathname) {
+					skip = true;
+					break;
+					}
+				}
+				for (let exLink in crawled) {
+					const exLinkUrl = new URL(exLink);
+					if (exLinkUrl.origin === linkUrl.origin && exLinkUrl.pathname === linkUrl.pathname) {
+					skip = true;
+					break;
+					}
+				}
+				for (let failLink of failed) {
+					const failLinkUrl = new URL(failLink);
+					if (failLinkUrl.origin === linkUrl.origin && failLinkUrl.pathname === linkUrl.pathname) {
+					skip = true;
+					break;
+					}
+				}
+				
+				if (skip) continue;
 
-		linkUrl.search = "";
-		linkUrl.hash = "";
+				linkUrl.search = "";
+				linkUrl.hash = "";
 
-		crawlQueue.push(linkUrl.href);
-	    }
-	    
-	    /*const texts = getTag([
-		"b",
-		"strong",
-		"i",
-		"em",
-		"mark",
-		"small",
-		"del",
-		"ins",
-		"sub",
-		"sup",
-		"p",
-		"h1",
-		"h2",
-		"h3",
-		"h4",
-		"h5",
-		"h6"
-	    ], content.html.body);
-	    for (let elem in texts) {
-		console.log(`elem: ${elem}`);
-		for (let text of texts[elem]) {
-		    if (text["#text"] !== undefined) if (text["#text"].trim() !== "") console.log(text["#text"]);
+				crawlQueue.push(linkUrl.href);
+			}
+			
+			const rawTexts = getTag([
+			"b",
+			"strong",
+			"i",
+			"em",
+			"mark",
+			"small",
+			"del",
+			"ins",
+			"sub",
+			"sup",
+			"p",
+			"h1",
+			"h2",
+			"h3",
+			"h4",
+			"h5",
+			"h6",
+			"a"
+			], content.html.body);
+			for (let elem in rawTexts) {
+				for (let text of rawTexts[elem]) {
+					text = (text["#text"] ?? "").toString().trim();
+					metadata.text += " " + text;
+				}
+			}
+
+			metadata.text = metadata.text.replace(/\s+/g, " ");
 		}
-	    }*/
-	}
     }
 
     if (index) crawled[site] = metadata
     else failed.push(site);
 
-    // console.log(metadata);
+    console.log(metadata);
 }
 
 console.log(linkCount);
