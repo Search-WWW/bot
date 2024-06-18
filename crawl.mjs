@@ -87,7 +87,7 @@ while (crawlQueue.length > 0) {
     try {
 	info = await getInfo(site);
     } catch (err) {
-	console.error(err.message);
+	console.error("getInfo: " + err.message);
 	failed.push(site);
 	continue;
     }
@@ -123,7 +123,7 @@ while (crawlQueue.length > 0) {
 	    continue;
 	};
     } catch (err) {
-	console.error(err.message);
+	console.error("Fetch: " + err.message);
 	failed.push(site);
 	continue;
     }
@@ -132,7 +132,7 @@ while (crawlQueue.length > 0) {
     try {
 	content = parser.parse(await res.text());
     } catch (err) {
-	console.error(err.message);
+	console.error("Parse: " + err.message);
 	failed.push(site);
 	continue;
     }
@@ -142,6 +142,7 @@ while (crawlQueue.length > 0) {
     metadata.keywords = metadata.keywords ?? [];
     metadata.author = metadata.author ?? { name: "", link: "" };
     metadata.creators = metadata.creators ?? [];
+	metadata.linkText = metadata.linkText ?? [];
 
     let index = true;
     let follow = true;
@@ -238,62 +239,72 @@ while (crawlQueue.length > 0) {
 
 	if (content.html.body !== undefined) {
 	    let links = [];
-	    for (let link of getTag("a", content.html.body).a ?? []) {
-		const linkUrl = new URL(link["@_href"], site);
+	    if (follow) {
+			for (let link of getTag("a", content.html.body).a ?? []) {
+				const linkUrl = new URL(link["@_href"], site);
+
+				if (linkUrl.protocol !== "https:" && linkUrl.protocol !== "http:") continue;
+
+				linkUrl.search = "";
+				linkUrl.hash = "";
+
+				const linkContent = (link["#text"] ?? "").toString().trim()
+				if (linkContent !== "") {
+					crawled[linkUrl.href] = typeof crawled[linkUrl.href] === "object" ? crawled[linkUrl.href] : {};
+					crawled[linkUrl.href].linkText = crawled[linkUrl.href].linkText instanceof Array ? crawled[linkUrl.href].linkText : [];
+
+					crawled[linkUrl.href].linkText.push(linkContent);
+				};
+				
+				let skip = false;
+				
+				for (let rel of (link["@_rel"] ?? "").split(" ")) {
+					switch (rel.trim().toLowerCase()) {
+					case 'nofollow':
+					skip = true;
+					break;
+					default:
+					break;
+					}
+				}
 		
-		let skip = false;
-
-		linkUrl.search = "";
-		linkUrl.hash = "";
+				if (!skip) links.push(linkUrl.href);
 		
-		for (let rel of (link["@_rel"] ?? "").split(" ")) {
-		    switch (rel.trim().toLowerCase()) {
-		    case 'nofollow':
-			skip = true;
-			break;
-		    default:
-			break;
-		    }
-		}
-
-		if (linkUrl.protocol !== "https:" && linkUrl.protocol !== "http:") continue;
-
-		if (!skip) links.push(linkUrl.href);
-
-		for (let futLink of crawlQueue) {
-		    const futLinkUrl = new URL(futLink);
-		    if (futLinkUrl.href === linkUrl.href) {
-			skip = true;
-			break;
-		    }
-		}
-		for (let exLink in crawled) {
-		    const exLinkUrl = new URL(exLink);
-		    if (exLinkUrl.href === linkUrl.href) {
-			skip = true;
-			break;
-		    }
-		}
-		for (let failLink of failed) {
-		    const failLinkUrl = new URL(failLink);
-		    if (failLinkUrl.href === linkUrl.href) {
-			skip = true;
-			break;
-		    }
-		}
+				for (let futLink of crawlQueue) {
+					const futLinkUrl = new URL(futLink);
+					if (futLinkUrl.href === linkUrl.href) {
+					skip = true;
+					break;
+					}
+				}
+				for (let exLink in crawled) {
+					const exLinkUrl = new URL(exLink);
+					if (exLinkUrl.href === linkUrl.href) {
+					skip = true;
+					break;
+					}
+				}
+				for (let failLink of failed) {
+					const failLinkUrl = new URL(failLink);
+					if (failLinkUrl.href === linkUrl.href) {
+					skip = true;
+					break;
+					}
+				}
+				
+				if (skip) continue;
 		
-		if (skip) continue;
+				crawlQueue.push(linkUrl.href);
+			}
+		}
 
-		crawlQueue.push(linkUrl.href);
-	    }
-
-	    const linkPoints = metadata.points / links.length;
+	    const linkPoints = metadata.points / Math.max(links.length, 1);
 	    for (let link of links) {
 		const linkUrl = new URL(link["@_href"], site);
 		
 		crawled[link] = crawled[link] ?? {};
 		crawled[link].points = typeof crawled[link].points === "number" ? crawled[link].points : 0;
-		crawled[link].points += Math.min(linkPoints * (siteUrl.origin === linkUrl.origin ? 2 : 1), metadata.points);
+		crawled[link].points += Math.min((siteUrl.origin === linkUrl.origin ? metadata.points / 10 : linkPoints), metadata.points);
 	    }
 	    
 	    const rawTexts = getTag([
@@ -318,9 +329,10 @@ while (crawlQueue.length > 0) {
 	    ], content.html.body);
 	    for (let elem in rawTexts) {
 		for (let text of rawTexts[elem]) {
-		    if (text["#text"] === undefined) continue;
+			if (text["@_hidden"] !== undefined) continue;
 		    text = (text["#text"] ?? "").toString().trim();
-		    metadata.text += " " + text;
+			if (text === "") continue;
+		    metadata.text = typeof metadata.text === "string" ? metadata.text + " " + text : text;
 		}
 	    }
 

@@ -94,14 +94,9 @@ function parseRobots(robots) {
 	    currentUserAgents.push(line.substring(12));
 
 	    for (const currentUserAgent of currentUserAgents) {
-		if (typeof result[currentUserAgent] !== "object" ||
-		    !result[currentUserAgent].allow instanceof Array ||
-		    !result[currentUserAgent].disallow instanceof Array) {
-		    result[currentUserAgent] = {
-			allow: [],
-			disallow: []
-		    };
-		}
+			result[currentUserAgent] = typeof result[currentUserAgent] === "object" ? result[currentUserAgent] : {};
+			result[currentUserAgent].allow = typeof result[currentUserAgent].allow === "array" ? result[currentUserAgent].allow : [];
+			result[currentUserAgent].disallow = typeof result[currentUserAgent].disallow === "array" ? result[currentUserAgent].disallow : [];
 	    }
 	    
 	    continue;
@@ -133,34 +128,20 @@ function parseRobots(robots) {
 async function getRobots(baseUrl) {
     const url = new URL("/robots.txt", baseUrl);
 
-    try {
-	const headers = new Headers(globalHeaders);
+    const headers = new Headers(globalHeaders);
 	const options = {
 	    headers: headers
 	};
 	
 	const res = await fetch(url.href, options);
 
-	if (res.status >= 400 && res.status < 499) {
-	    return {
-		"*": {
-		    allow: [ "*" ]
-		}
-	    };
-	} else if (res.status >= 500 && res.status < 599) {
-	    return {
-		"*": {
-		    disallow: [ "*" ]
-		}
-	    };
+	if (!res.ok) {
+		throw new Error("HTTP Error " + res.status + ": " + res.statusText);
 	}
 	
 	const robots = await res.text();
 
 	return parseRobots(robots);
-    } catch (err) {
-	throw err;
-    }
 }
 
 export { getRobots, getRobotsRules, parseRobots, matchRobots }
