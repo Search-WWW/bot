@@ -8,7 +8,6 @@ import { XMLParser } from 'fast-xml-parser';
 
 let crawlQueue = config.bot.crawlStart;
 let crawled = {};
-let failed = [];
 let linkCount = 0;
 for (let site of crawlQueue) {
     crawled[site] = { points: 1000 };
