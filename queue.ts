@@ -1,14 +1,31 @@
-'use strict';
+class Queue<Type> {
+  protected queue : Array<Type>;
 
-class Queue {
-    #queue : Array<any> = [];
+  constructor() {
+    this.queue = [];
+  }
 
-    constructor() {
-        console.log(this.#queue);
+  public add(elem : Type) : number {
+    for (let oldElem of this.queue) {
+      if (elem === oldElem) {
+	return this.queue.length;
+      }
     }
 
-    add(elem : any) : number {
-        let exists : boolean = false;
-        for (let )
-    }
+    return this.queue.push(elem);
+  }
+
+  public remove() : Type | undefined {
+    return this.queue.shift();
+  }
+
+  public get length() : number {
+    return this.queue.length;
+  }
+
+  public [Symbol.iterator]() : IterableIterator<Type> {
+    return this.queue[Symbol.iterator]();
+  }
 }
+
+export { Queue };
