@@ -3,3 +3,4 @@
 **/.#*
 .direnv
 node_modules
+build
