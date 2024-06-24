@@ -11,20 +11,20 @@ type overwriteOption = "old" | "new" | "merge";
 
 interface Author {
   name? : optional<string>,
-  link? : optional<string>
+  link? : optional<URL>
 }
 interface SiteMetadata {
   title? : optional<string>,
   description? : optional<string>,
-  icon? : optional<string>,
-  image? : optional<string>,
+  icon? : optional<URL>,
+  image? : optional<URL>,
   language? : optional<string>,
   author? : optional<Author>,
   creators? : optional<Array<string>>,
   publisher? : optional<string>,
-  license? : optional<string>,
-  privacyPolicy? : optional<string>,
-  termsOfService? : optional<string>,
+  license? : optional<URL>,
+  privacyPolicy? : optional<URL>,
+  termsOfService? : optional<URL>,
   keywords? : optional<Array<string>>,
   text? : optional<string>,
   linkText? : optional<Array<string>>,
@@ -36,18 +36,18 @@ interface SiteMetadata {
 class Site implements SiteMetadata {
   public title : string = "";
   public description : string = "";
-  public icon : string = "";
-  public image : string = "";
+  public icon : URL = new URL("file:///dev/null");
+  public image : URL = new URL("file:///dev/null");
   public language : string = "";
   public author : Author = {
     name: "",
-    link: ""
+    link: new URL("file:///dev/null")
   };
   public creators : Array<string> = [];
   public publisher : string = "";
-  public license : string = "";
-  public privacyPolicy : string = "";
-  public termsOfService : string = "";
+  public license : URL = new URL("file:///dev/null");
+  public privacyPolicy : URL = new URL("file:///dev/null");
+  public termsOfService : URL = new URL("file:///dev/null");
   public keywords : Array<string> = [];
   public text : string = "";
   public linkText : Array<string> = [];
@@ -177,160 +177,9 @@ class Site implements SiteMetadata {
   }
 }
 
-let crawlQueue : Queue<string> = new Queue<string>();
-let siteMeta : Map<string, SiteMetadata> = new Map<string, SiteMetadata>();
-let linkCount : number = 0;
-for (let site of config.bot.crawlStart) {
-  crawlQueue.add(site);
-  siteMeta.set(site, (new Site(siteMeta.get(site))).Append({ points: 1000 }));
-}
-
-const headers = new Headers(globalHeaders);
-const fetchOptions = {
-  headers: headers
-};
-
-const parserOptions = {
-  allowBooleanAttributes: true,
-  alwaysCreateTextNode: true,
-  atributesNamePrefix: "@_",
-  htmlEntities: true,
-  ignoreDeclaration: true,
-  ignorePiTags: true,
-  parseAttributeValue: true,
-  parseTagValue: true,
-  trimValues: true,
-  ignoreAttributes: false,
-  unpairedTags: ["hr", "br", "link", "meta"],
-  stopNodes : [ "*.pre", "*.script"],
-  processEntities: true,
-  isArray: (name : string, jpath : string, isLeafNode : boolean, isAttribute : boolean) => {
-    if (isAttribute) return false;
-    if (name === "html" || name === "head" || name === "body") return false;
-    if (name === "meta" || name === "link") return true;
-    if (jpath.startsWith("html.body")) return true;
-    return false;
-  }
-};
-const parser = new XMLParser(parserOptions);
-
-type tag = {
+function parseHTML(content : {
   [key : string] : any
-};
-
-function getTag(tags : string | Array<string>, data : { [key : string] : any }) : Map<string, Array<tag>> {
-  if (typeof tags === "string") tags = [ tags ];
-  let result : Map<string, Array<tag>> = new Map<string, Array<tag>>();
-
-  for (let tag of tags) {
-    let tempRes : Array<tag> = [];
-
-    if ((data[tag] ?? {}).length ?? 0 > 0) {
-      for (let value of data[tag]) {
-	tempRes.push(value);
-      }
-    } else if (data[tag] !== undefined) {
-      tempRes.push(data[tag]);
-    }
-
-    result.set(tag, tempRes);
-  }
-
-  for (let elems in data) {
-    if (elems.startsWith("@_") || elems === "#text" || elems === "script" || elems === "style" || elems === "hr" || elems === "br") continue;
-    for (let elem of data[elems]) {
-      try {
-	const addRes : Map<string, Array<tag>> = getTag(tags, elem);
-	for (let tag of addRes) {
-	  let tempRes : Array<tag> = result.get(tag[0]) ?? [];
-	  
-	  for (let i of tag[1]) {
-	    tempRes.push(i);
-	  }
-	  
-	  result.set(tag[0], tempRes);
-	}
-      } catch (err : any) {
-	console.error(err.message);
-      }
-    }
-  }
-
-  return result;
-}
-
-while (crawlQueue.length > 0) {
-  const site : string = crawlQueue.remove() ?? "";
-  const siteUrl : URL = new URL(site ?? "");
-  if (site.trim() === "") {
-    console.error(`crawl: site is empty`);
-    continue;
-  }
-  let metadata : SiteMetadata = new Site(siteMeta.get(site));
-  linkCount++;
-  console.log(`#${linkCount}: ${site}`);
-    
-  let info;
-  try {
-    info = await getInfo(site);
-  } catch (err : any) {
-    console.error("getInfo: " + err.message);
-    metadata.failed = true;
-    siteMeta.set(site, metadata);
-    continue;
-  }
-
-  let isDisallowed = false;
-  for (let disallowedSite of info.disallow) {
-    if (!matchRobots(disallowedSite, site)) continue;
-
-    let isAllowed = false;
-    for (let allowedSite of info.allow) {
-      if (matchRobots(allowedSite, site) && allowedSite.length > disallowedSite.length) {
-	isAllowed = true;
-	break;
-      };
-    }
-
-    if (!isAllowed) isDisallowed = true;
-    else isDisallowed = false;
-  }
-
-  if (isDisallowed) {
-    metadata.indexed = false;
-    siteMeta.set(site, metadata);
-  };
-
-  let res;
-  try {
-    res = await fetch(site, fetchOptions);
-	
-    if (!res.ok) throw new Error(`HTTP Error ${res.status}: ${res.statusText}`);
-	
-    const contentType = httpHeaderParse(res.headers.get("Content-Type") ?? "");
-    if (contentType[contentType.length - 1].mainParam !== "text/html") {
-      console.error("A non-HTML document");
-      metadata.failed = true;
-      siteMeta.set(site, metadata);
-      continue;
-    };
-  } catch (err : any) {
-    console.error("Fetch: " + err.message);
-    metadata.failed = true;
-    siteMeta.set(site, metadata);
-    continue;
-  }
-
-  let content;
-  try {
-    content = parser.parse(await res.text());
-  } catch (err : any) {
-    console.error("Parse: " + err.message);
-    metadata.failed = true;
-    siteMeta.set(site, metadata);
-    continue;
-  }
-
+}, metadata : SiteMetadata, siteUrl : URL) : SiteMetadata {
   metadata.author = metadata.author ?? {};
   metadata.keywords = metadata.keywords ?? [];
   metadata.creators = metadata.creators ?? [];
@@ -340,6 +189,7 @@ while (crawlQueue.length > 0) {
   let follow = true;
 
   if (content.html !== undefined) {
+    let links : Array<URL> = [];
     if (content.html.head !== undefined) {
       metadata.title = (content.html.head.title ?? {"#text": ""})["#text"] ?? "";
       for (let meta of content.html.head.meta ?? []) {
@@ -398,58 +248,90 @@ while (crawlQueue.length > 0) {
       }
       if (!index) {
 	metadata.indexed = false;
-	siteMeta.set(site, metadata);
+	siteMeta.set(siteUrl, metadata);
       };
       for (let link of content.html.head.link ?? []) {
-	const name = (link["@_rel"] ?? "").toString().trim().toLowerCase();
-	const content = (link["@_href"] ?? "").toString();
+	const name : string = (link["@_rel"] ?? "").toString();
+	const linkUrl : URL = sanitizeURL(new URL((link["@_href"] ?? "").toString().trim(), siteUrl.href));
+
+	let follow : boolean = true;
 		
-	switch (name) {
-	  case 'made':
-		    // pass
-	  case 'author':
-	    metadata.author.link = (new URL(content, site)).href;
-	    break;
-	  case 'icon':
-	    metadata.icon = (new URL(content, site)).href;
-	    break;
-	  case 'license':
-	    metadata.license = (new URL(content, site)).href;
-	    break;
-	  case 'privacy-policy':
-	    metadata.privacyPolicy = (new URL(content, site)).href;
-	    break;
-	  case 'terms-of-service':
-	    metadata.termsOfService = (new URL(content, site)).href;
-	    break;
-	  case 'img_src':
-	    metadata.image = (new URL(content, site)).href;
-	    break;
-	  default:
-	    break;
+	for (let param of name.split(" ")) {
+	  switch (name.trim().toLowerCase()) {
+	    case 'bookmark': // pass
+	    case 'dns-prefetch': // pass
+	    case 'manifest': // pass
+	    case 'module-preload': // pass
+	    case 'pingback': // pass
+	    case 'preconnect': // pass
+	    case 'prefetch': // pass
+	    case 'preload': // pass
+	    case 'prerender': // pass
+	    case 'search': // pass
+	    case 'stylesheet':
+	      follow = false;
+	      break;
+	    case 'canonical':
+	      if (linkUrl !== siteUrl) metadata.indexed = false;
+	    case 'made': // pass
+	    case 'author':
+	      metadata.author.link = linkUrl;
+	      break;
+	    case 'icon':
+	      follow = false;
+	      metadata.icon = linkUrl;
+	      break;
+	    case 'license':
+	      metadata.license = linkUrl;
+	      break;
+	    case 'privacy-policy':
+	      metadata.privacyPolicy = linkUrl;
+	      break;
+	    case 'terms-of-service':
+	      metadata.termsOfService = linkUrl;
+	      break;
+	    case 'img_src':
+	      follow = false;
+	      metadata.image = linkUrl;
+	      break;
+	    default:
+	      break;
+	  }
 	}
+
+	if (!follow) continue;
+
+	links.push(linkUrl);
+	addToQueue(linkUrl);
       }
     }
     metadata.language = content.html["@_lang"];
 
     if (content.html.body !== undefined) {
-      let links = [];
       if (follow) {
-	for (let link of getTag("a", content.html.body).get("a") ?? []) {
-	  const linkUrl = new URL(link["@_href"], site);
+	let tags = getTag([
+	  "a",
+	  "area"
+	], content.html.body);
 
-	  if (linkUrl.protocol !== "https:" && linkUrl.protocol !== "http:") continue;
+	let allTags : Array<any> = [];
 
-	  linkUrl.search = "";
-	  linkUrl.hash = "";
+	for (let tag of tags) {
+	  allTags = allTags.concat(tag);
+	}
+	
+	for (let link of allTags) {
+	  const name : string = (link["@_rel"] ?? "").toString();
+	  const linkUrl : URL = sanitizeURL(new URL((link["@_href"] ?? "").toString().trim(), siteUrl.href));
 
-	  const linkContent = (link["#text"] ?? "").toString().trim()
-	  if (linkContent !== "") siteMeta.set(linkUrl.href, (new Site(siteMeta.get(linkUrl.href))).Append({ linkText: [ linkContent ] }));
+	  const linkContent : string = (link["#text"] ?? "").toString().trim();
+	  if (linkContent !== "") siteMeta.set(linkUrl, (new Site(siteMeta.get(linkUrl))).Append({ linkText: [ linkContent ] }));
 	  
 	  let skip = false;
-				
-	  for (let rel of (link["@_rel"] ?? "").split(" ")) {
+	  
+	  for (let rel of name.split(" ")) {
 	    switch (rel.trim().toLowerCase()) {
+	      case 'bookmark': // pass
 	      case 'nofollow':
 		skip = true;
 		break;
@@ -458,48 +340,11 @@ while (crawlQueue.length > 0) {
 	    }
 	  }
 		
-	  if (!skip) links.push(linkUrl.href);
-	  
-	  for (let futLink of crawlQueue) {
-	    let futLinkUrl : URL;
-	    try {
-	      futLinkUrl = new URL(futLink);
-	    } catch (err : any) {
-	      console.error(`Queued links check: ${err.message}`);
-	      continue;
-	    }
-	    if (futLinkUrl.href === linkUrl.href) {
-	      skip = true;
-	      break;
-	    }
-	  }
-	  for (let exLink of siteMeta) {
-	    let exLinkUrl : URL;
-	    try {
-	      exLinkUrl = new URL(exLink[0]);
-	    } catch (err : any) {
-	      console.error(`Crawled links check: ${err.message}`);
-	      continue;
-	    }
-	    if (exLinkUrl.href === linkUrl.href) {
-	      skip = true;
-	      break;
-	    }
-	  }
-				
 	  if (skip) continue;
-		
-	  crawlQueue.add(linkUrl.href);
+	    
+	  links.push(linkUrl);
+	  addToQueue(linkUrl);
 	}
-      }
-
-      const linkPoints = metadata.points / Math.max(links.length, 1);
-      for (let link of links) {
-	const linkUrl : URL = new URL(link, site);
-	const isSameOrigin : boolean = siteUrl.origin === linkUrl.origin;
-	
-	const linkMeta = new Site(siteMeta.get(link));
-	siteMeta.set(link, linkMeta.Append({ points: linkMeta.points + Math.min((isSameOrigin ? (metadata.points / 10) : linkPoints), metadata.points) }));
       }
 	    
       const rawTexts = getTag([
@@ -533,10 +378,411 @@ while (crawlQueue.length > 0) {
 
       metadata.text = (metadata.text ?? "").toString().replace(/\s+/g, " ");
     }
+    
+    const linkPoints = metadata.points / Math.max(links.length, 1);
+    for (let linkUrl of links) {
+      const isSameOrigin : boolean = siteUrl.origin === linkUrl.origin;
+
+      const linkMeta = new Site(siteMeta.get(linkUrl));
+      if (linkCount === 47) {
+	console.log(`Shits going down: ${linkUrl.href}`);
+      }
+      siteMeta.set(linkUrl, linkMeta.Append({ points: linkMeta.points + Math.min((isSameOrigin ? (metadata.points / 10) : linkPoints), metadata.points) }));
+    }
   }
 
-  siteMeta.set(site, metadata);
-  console.log(metadata);
+  return metadata;
+}
+
+function parseXML(content : {
+  [key : string] : any
+}, metadata : SiteMetadata, siteUrl : URL) : SiteMetadata {
+  metadata.author = metadata.author ?? {};
+  metadata.keywords = metadata.keywords ?? [];
+  metadata.creators = metadata.creators ?? [];
+  metadata.points = metadata.points ?? 0;
+  metadata.text = metadata.text ?? "";
+
+  if (content.rss !== undefined) {
+    switch (content.rss["@_version"]) {
+      case '2.0':
+	const channel = content.rss.channel;
+	metadata.title = channel.title["#text"];
+	metadata.description = channel.description["#text"];
+	if (channel.language !== undefined) metadata.language = channel.language["#text"];
+	if (channel.image !== undefined) metadata.image = sanitizeURL(new URL(channel.image.url["#text"]));
+
+	addToQueue(new URL(channel.link["#text"]));
+	if (channel.docs !== undefined) addToQueue(new URL(channel.docs["#text"]));
+
+	for (let category of channel.category ?? []) {
+	  metadata.keywords.push(category["#text"]);
+	}
+
+	for (let item of channel.item ?? []) {
+	  if (item.title !== undefined) metadata.text += metadata.text.trim() === "" ? item.title.trim() : " " + item.title.trim();
+	  if (item.description !== undefined) metadata.text += metadata.text.trim() === "" ? item.description.trim() : " " + item.description.trim();
+	  
+	  if (item.link !== undefined) sanitizeURL(new URL(item.link.trim(), siteUrl));
+	}
+	break;
+      default:
+	console.log(content.rss["@_version"]);
+	throw new RangeError("Unknown version of RSS");
+    }
+  } else if (content.atom !== undefined) {
+    const feed = content.atom.feed;
+    metadata.title = feed.title.trim();
+    if (feed.author !== undefined) {
+      const author = feed.author;
+      metadata.author.name = author.name.trim();
+      if (author.uri !== undefined) metadata.author.link = sanitizeURL(new URL(author.uri.trim(), siteUrl));
+    };
+    if (feed.icon !== undefined) metadata.icon = sanitizeURL(new URL(feed.icon.trim(), siteUrl));
+    if (feed.logo !== undefined) metadata.image = sanitizeURL(new URL(feed.logo.trim(), siteUrl));
+    if (feed.subtitle !== undefined) metadata.description = feed.subtitle.trim();
+
+    addToQueue(sanitizeURL(new URL(feed.id.trim(), siteUrl)));
+    
+    if (feed.link !== undefined) {
+      for (let link of feed.link) {
+	const linkUrl = sanitizeURL(new URL(feed.link["@_href"].trim(), siteUrl));
+	switch (link["@_rel"] ?? "") {
+	  case 'alternate':
+	    addToQueue(linkUrl);
+	    if (link["@_hreflang"] !== undefined) siteMeta.set(linkUrl, (new Site(siteMeta.get(linkUrl))).Append({ language: link["@_hreflang"] }));
+	    if (link["@_title"] !== undefined) {
+	      siteMeta.set(linkUrl, (new Site(siteMeta.get(linkUrl))).Append({ linkText: link["@_hreflang"] }));
+	      metadata.text += metadata.text.trim() === "" ? link.title.trim() : " " + link.title.trim();
+	    }
+	    break;
+	  case 'enclosure':
+	    break;
+	  case 'related':
+	    addToQueue(linkUrl);
+	    if (link["@_hreflang"] !== undefined) siteMeta.set(linkUrl, (new Site(siteMeta.get(linkUrl))).Append({ language: link["@_hreflang"] }));
+	    if (link["@_title"] !== undefined) {
+	      siteMeta.set(linkUrl, (new Site(siteMeta.get(linkUrl))).Append({ linkText: link["@_hreflang"] }));
+	      metadata.text += metadata.text.trim() === "" ? link.title.trim() : " " + link.title.trim();
+	    }
+	    break;
+	  case 'self':
+	    break;
+	  case 'via':
+	    addToQueue(linkUrl);
+	    if (link["@_hreflang"] !== undefined) siteMeta.set(linkUrl, (new Site(siteMeta.get(linkUrl))).Append({ language: link["@_hreflang"] }));
+	    if (link["@_title"] !== undefined) {
+	      siteMeta.set(linkUrl, (new Site(siteMeta.get(linkUrl))).Append({ linkText: link["@_hreflang"] }));
+	      metadata.text += metadata.text.trim() === "" ? link.title.trim() : " " + link.title.trim();
+	    }
+	    break;
+	  default:
+	    break;
+	}
+      }
+    }
+    for (let category of feed.category ?? []) {
+      if (category["@_term"].trim() !== "") metadata.keywords.push(category["@_term"].trim());
+      if (category["@_label"].trim() !== "") metadata.text.trim() === "" ? category["@_label"].trim() : " " + category["@_label"].trim();
+    }
+    for (let contributor of feed.contributor ?? []) {
+      metadata.creators.push(contributor.name["#text"].trim());
+    }
+
+    for (let entry of feed.entry ?? []) {
+      metadata.text += metadata.text.trim() === "" ? entry.title.trim() : " " + entry.title.trim();
+      if (feed.summary !== undefined) metadata.text += metadata.text.trim() === "" ? entry.summary.trim() : " " + entry.summary.trim();
+      if (feed.content !== undefined) metadata.text += metadata.text.trim() === "" ? entry.content.trim() : " " + entry.contenr.trim();
+
+      addToQueue(sanitizeURL(new URL(entry.id.trim(), siteUrl)));
+
+      if (feed.link !== undefined) {
+	for (let link of feed.link) {
+	  const linkUrl = sanitizeURL(new URL(feed.link["@_href"].trim(), siteUrl));
+	  switch (link["@_rel"] ?? "") {
+	    case 'alternate':
+	      addToQueue(linkUrl);
+	      if (link["@_hreflang"] !== undefined) siteMeta.set(linkUrl, (new Site(siteMeta.get(linkUrl))).Append({ language: link["@_hreflang"] }));
+	      if (link["@_title"] !== undefined) {
+		siteMeta.set(linkUrl, (new Site(siteMeta.get(linkUrl))).Append({ linkText: link["@_hreflang"] }));
+		metadata.text += metadata.text.trim() === "" ? link.title.trim() : " " + link.title.trim();
+	      }
+	      break;
+	    case 'enclosure':
+	      break;
+	    case 'related':
+	      addToQueue(linkUrl);
+	      if (link["@_hreflang"] !== undefined) siteMeta.set(linkUrl, (new Site(siteMeta.get(linkUrl))).Append({ language: link["@_hreflang"] }));
+	      if (link["@_title"] !== undefined) {
+		siteMeta.set(linkUrl, (new Site(siteMeta.get(linkUrl))).Append({ linkText: link["@_hreflang"] }));
+		metadata.text += metadata.text.trim() === "" ? link.title.trim() : " " + link.title.trim();
+	      }
+	      break;
+	    case 'self':
+	      break;
+	    case 'via':
+	      addToQueue(linkUrl);
+	      if (link["@_hreflang"] !== undefined) siteMeta.set(linkUrl, (new Site(siteMeta.get(linkUrl))).Append({ language: link["@_hreflang"] }));
+	      if (link["@_title"] !== undefined) {
+		siteMeta.set(linkUrl, (new Site(siteMeta.get(linkUrl))).Append({ linkText: link["@_hreflang"] }));
+		metadata.text += metadata.text.trim() === "" ? link.title.trim() : " " + link.title.trim();
+	      }
+	      break;
+	    default:
+	      break;
+	  }
+	}
+      }
+    }
+  } else throw new RangeError("Unknown XML-based document format");
+  
+  return metadata;
+}
+
+let crawlQueue : Queue<URL> = new Queue<URL>();
+let siteMeta : Map<URL, SiteMetadata> = new Map<URL, SiteMetadata>();
+let sitemaps : Array<string> = new Array<string>();
+let linkCount : number = 0;
+for (let site of config.bot.crawlStart) {
+  const siteUrl = sanitizeURL(new URL(site));
+  crawlQueue.add(siteUrl);
+  siteMeta.set(siteUrl, (new Site(siteMeta.get(siteUrl))).Append({ points: 1000 }));
+}
+
+const headers = new Headers(globalHeaders);
+const fetchOptions = {
+  headers: headers
+};
+
+type tag = {
+  [key : string] : any
+};
+
+function getTag(tags : string | Array<string>, data : { [key : string] : any }) : Map<string, Array<tag>> {
+  if (typeof tags === "string") tags = [ tags ];
+  let result : Map<string, Array<tag>> = new Map<string, Array<tag>>();
+
+  for (let tag of tags) {
+    let tempRes : Array<tag> = [];
+
+    if ((data[tag] ?? {}).length ?? 0 > 0) {
+      for (let value of data[tag]) {
+	tempRes.push(value);
+      }
+    } else if (data[tag] !== undefined) {
+      tempRes.push(data[tag]);
+    }
+
+    result.set(tag, tempRes);
+  }
+
+  for (let elems in data) {
+    if (elems.startsWith("@_") || elems === "#text" || elems === "script" || elems === "style" || elems === "hr" || elems === "br") continue;
+    for (let elem of data[elems]) {
+      try {
+	const addRes : Map<string, Array<tag>> = getTag(tags, elem);
+	for (let tag of addRes) {
+	  let tempRes : Array<tag> = result.get(tag[0]) ?? [];
+	  
+	  for (let i of tag[1]) {
+	    tempRes.push(i);
+	  }
+	  
+	  result.set(tag[0], tempRes);
+	}
+      } catch (err : any) {
+	console.error(err.message);
+      }
+    }
+  }
+
+  return result;
+}
+
+function sanitizeURL(url : URL) : URL {
+  url.username = "";
+  url.password = "";
+  url.search = "";
+  url.hash = "";
+
+  return url;
+}
+
+async function addToQueue(url : URL) : Promise<void> {
+  let urls : Array<URL> = [];
+  url = sanitizeURL(url);
+
+  if (url.protocol !== "https:" && url.protocol !== "http:") return;
+  
+  for (let link of crawlQueue) {
+    link = sanitizeURL(link);
+    if (urls.includes(link)) continue;
+    urls.push(link);
+  }
+  for (let exLink of siteMeta) {
+    const link : URL = sanitizeURL(exLink[0]);
+    if (urls.includes(link)) continue;
+    urls.push(link);
+  }
+
+  for (let link of urls) {
+    if (url.href === link.href) return;
+  }
+
+  crawlQueue.add(url);
+}
+
+while (crawlQueue.length > 0) {
+  const siteUrl : URL = crawlQueue.remove() ?? new URL("https://example.com");
+  let metadata : SiteMetadata = new Site(siteMeta.get(siteUrl));
+  linkCount++;
+  console.log(`#${linkCount}: ${siteUrl.href}`);
+  console.log(`prevMax: ${linkCount + crawlQueue.length}`);
+    
+  let info;
+  try {
+    info = await getInfo(siteUrl.href);
+  } catch (err : any) {
+    console.error("getInfo: " + err.message);
+    metadata.failed = true;
+    siteMeta.set(siteUrl, metadata);
+    continue;
+  }
+
+  let isDisallowed = false;
+  for (let disallowedSite of info.disallow) {
+    if (!matchRobots(disallowedSite, siteUrl.pathname)) continue;
+
+    let isAllowed = false;
+    for (let allowedSite of info.allow) {
+      if (matchRobots(allowedSite, siteUrl.pathname) && allowedSite.length > disallowedSite.length) {
+	isAllowed = true;
+	break;
+      };
+    }
+
+    if (!isAllowed) isDisallowed = true;
+    else isDisallowed = false;
+  }
+
+  if (isDisallowed) {
+    metadata.indexed = false;
+    siteMeta.set(siteUrl, metadata);
+  };
+
+  if (siteUrl.protocol === "http:") {
+    try {
+      let newSiteUrl = new URL(siteUrl.href);
+      newSiteUrl.protocol = "https:";
+      const res = await fetch(newSiteUrl.href, fetchOptions);
+
+      if (!res.ok) throw new Error(`HTTP Error ${res.status}: ${res.statusText}`);
+
+      addToQueue(newSiteUrl);
+      continue;
+    } catch (err : any) {
+      console.error(`HTTPS upgrade: ${err.message}`);
+    }
+  }
+
+  if (!sitemaps.includes(siteUrl.origin)) {
+    console.log("Adding links from sitemap.");
+    for (let url of info.sitemap) {
+      addToQueue(new URL(url.url));
+      for (let language of url.languages ?? []) {
+	addToQueue(new URL(language[1]));
+      }
+    }
+
+    sitemaps.push(siteUrl.origin);
+  }
+
+  let res;
+  let contentType : string;
+  try {
+    res = await fetch(siteUrl.href, fetchOptions);
+	
+    if (!res.ok) throw new Error(`HTTP Error ${res.status}: ${res.statusText}`);
+	
+    const contentTypes = httpHeaderParse(res.headers.get("Content-Type") ?? "");
+    contentType = contentTypes[contentTypes.length - 1].mainParam;
+  } catch (err : any) {
+    console.error("Fetch: " + err.message);
+    metadata.failed = true;
+    siteMeta.set(siteUrl, metadata);
+    continue;
+  }
+  try {
+    let parserOptions;
+    let parser;
+    switch (contentType) {
+      case 'text/html': // pass
+      case 'application/xhtml+xml':
+	parserOptions = {
+	  allowBooleanAttributes: true,
+	  alwaysCreateTextNode: true,
+	  attributeNamePrefix: "@_",
+	  htmlEntities: true,
+	  ignoreDeclaration: true,
+	  ignorePiTags: true,
+	  parseAttributeValue: true,
+	  parseTagValue: true,
+	  ignoreAttributes: false,
+	  unpairedTags: ["hr", "br", "link", "meta"],
+	  stopNodes : [ "*.pre", "*.script"],
+	  processEntities: true,
+	  isArray: (name : string, jpath : string, isLeafNode : boolean, isAttribute : boolean) => {
+	    if (isAttribute) return false;
+	    if (name === "html" || name === "head" || name === "body") return false;
+	    if (name === "meta" || name === "link") return true;
+	    if (jpath.startsWith("html.body")) return true;
+	    return false;
+	  }
+	};
+	parser = new XMLParser(parserOptions);
+	metadata = parseHTML(parser.parse(await res.text()), metadata, siteUrl);
+	break;
+      case 'application/rss+xml': // pass
+      case 'application/atom+xml': // pass
+      case 'text/xml': // pass
+      case 'application/xml':
+	parserOptions = {
+	  allowBooleanAttributes: true,
+	  alwaysCreateTextNode: true,
+	  attributeNamePrefix: "@_",
+	  ignoreDeclaration: true,
+	  ignorePiTags: true,
+	  parseAttributeValue: false,
+	  parseTagValue: false,
+	  ignoreAttributes: false,
+	  processEntities: true,
+	  isArray: (name : string, jpath : string, isLeafNode : boolean, isAttribute : boolean) => {
+	    if (isAttribute) return false;
+	    if (name === "rss" || name === "channel" || name === "category") return false;
+	    if (name === "item" || name === "entry") return true;
+	    if (jpath.startsWith("feed") && jpath.endsWith("link")) return true;
+	    return false;
+	  }
+	};
+	parser = new XMLParser(parserOptions);
+	metadata = parseXML(parser.parse(await res.text()), metadata, siteUrl);
+	break;
+      default:
+	console.error("Unknown document type");
+	metadata.failed = true;
+	siteMeta.set(siteUrl, metadata);
+	break;
+    }
+  } catch (err : any) {
+    console.error("Parse: " + err.message);
+    metadata.failed = true;
+    siteMeta.set(siteUrl, metadata);
+    continue;
+  }
+
+  siteMeta.set(siteUrl, metadata);
+  console.log(`currentMax: ${linkCount + crawlQueue.length}`);
+  // console.log(metadata);
 }
 
 console.log(linkCount);
