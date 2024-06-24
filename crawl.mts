@@ -420,29 +420,29 @@ function parseXML(content : {
 	}
 
 	for (let item of channel.item ?? []) {
-	  if (item.title !== undefined) metadata.text += metadata.text.trim() === "" ? item.title.trim() : " " + item.title.trim();
-	  if (item.description !== undefined) metadata.text += metadata.text.trim() === "" ? item.description.trim() : " " + item.description.trim();
+	  if (item.title !== undefined) metadata.text += metadata.text.trim() === "" ? item.title["#text"].trim() : " " + item.title["#text"].trim();
+	  if (item.description !== undefined) metadata.text += metadata.text.trim() === "" ? item.description["#text"].trim() : " " + item.description["#text"].trim();
 	  
-	  if (item.link !== undefined) sanitizeURL(new URL(item.link.trim(), siteUrl));
+	  if (item.link !== undefined) sanitizeURL(new URL(item.link["#text"].trim(), siteUrl));
 	}
 	break;
       default:
 	console.log(content.rss["@_version"]);
 	throw new RangeError("Unknown version of RSS");
     }
-  } else if (content.atom !== undefined) {
-    const feed = content.atom.feed;
-    metadata.title = feed.title.trim();
+  } else if (content.feed !== undefined) {
+    const feed = content.feed;
+    metadata.title = feed.title["#text"].trim();
     if (feed.author !== undefined) {
       const author = feed.author;
-      metadata.author.name = author.name.trim();
-      if (author.uri !== undefined) metadata.author.link = sanitizeURL(new URL(author.uri.trim(), siteUrl));
+      metadata.author.name = author.name["#text"].trim();
+      if (author.uri !== undefined) metadata.author.link = sanitizeURL(new URL(author.uri["#text"].trim(), siteUrl));
     };
-    if (feed.icon !== undefined) metadata.icon = sanitizeURL(new URL(feed.icon.trim(), siteUrl));
-    if (feed.logo !== undefined) metadata.image = sanitizeURL(new URL(feed.logo.trim(), siteUrl));
-    if (feed.subtitle !== undefined) metadata.description = feed.subtitle.trim();
+    if (feed.icon !== undefined) metadata.icon = sanitizeURL(new URL(feed.icon["#text"].trim(), siteUrl));
+    if (feed.logo !== undefined) metadata.image = sanitizeURL(new URL(feed.logo["#text"].trim(), siteUrl));
+    if (feed.subtitle !== undefined) metadata.description = feed.subtitle["#text"].trim();
 
-    addToQueue(sanitizeURL(new URL(feed.id.trim(), siteUrl)));
+    addToQueue(sanitizeURL(new URL(feed.id["#text"].trim(), siteUrl)));
     
     if (feed.link !== undefined) {
       for (let link of feed.link) {
@@ -490,11 +490,11 @@ function parseXML(content : {
     }
 
     for (let entry of feed.entry ?? []) {
-      metadata.text += metadata.text.trim() === "" ? entry.title.trim() : " " + entry.title.trim();
-      if (feed.summary !== undefined) metadata.text += metadata.text.trim() === "" ? entry.summary.trim() : " " + entry.summary.trim();
-      if (feed.content !== undefined) metadata.text += metadata.text.trim() === "" ? entry.content.trim() : " " + entry.contenr.trim();
+      metadata.text += metadata.text.trim() === "" ? entry.title["#text"].trim() : " " + entry.title["#text"].trim();
+      if (feed.summary !== undefined) metadata.text += metadata.text.trim() === "" ? entry.summary["#text"].trim() : " " + entry.summary["#text"].trim();
+      if (feed.content !== undefined) metadata.text += metadata.text.trim() === "" ? entry.content["#text"].trim() : " " + entry.content["#text"].trim();
 
-      addToQueue(sanitizeURL(new URL(entry.id.trim(), siteUrl)));
+      addToQueue(sanitizeURL(new URL(entry.id["#text"].trim(), siteUrl)));
 
       if (feed.link !== undefined) {
 	for (let link of feed.link) {
@@ -671,9 +671,15 @@ while (crawlQueue.length > 0) {
   };
 
   if (siteUrl.protocol === "http:") {
-    try {
-      let newSiteUrl = new URL(siteUrl.href);
-      newSiteUrl.protocol = "https:";
+	let newSiteUrl = new URL(siteUrl.href);
+	newSiteUrl.protocol = "https:";
+
+	const originHttps = new URL("https://" + siteUrl.host + "/");
+	if (siteMeta.has(originHttps)) {
+		addToQueue(newSiteUrl);
+		continue;
+	}
+	try {
       const res = await fetch(newSiteUrl.href, fetchOptions);
 
       if (!res.ok) throw new Error(`HTTP Error ${res.status}: ${res.statusText}`);
@@ -685,17 +691,19 @@ while (crawlQueue.length > 0) {
     }
   }
 
+  /*
   if (!sitemaps.includes(siteUrl.origin)) {
     console.log("Adding links from sitemap.");
     for (let url of info.sitemap) {
       addToQueue(new URL(url.url));
       for (let language of url.languages ?? []) {
-	addToQueue(new URL(language[1]));
+		addToQueue(new URL(language[1]));
       }
     }
 
     sitemaps.push(siteUrl.origin);
   }
+  */
 
   let res;
   let contentType : string;
