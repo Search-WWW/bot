@@ -2,7 +2,7 @@ import { getInfo } from './getInfo.mjs';
 import { globalHeaders, config } from './global.mjs';
 import { matchRobots } from './robots.mjs';
 import { httpHeaderParse } from './httpHeaderParse.mjs';
-import { XMLParser } from 'fast-xml-parser';
+import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { Queue } from './queue.js';
 import { URL } from 'node:url';
 
@@ -403,27 +403,45 @@ function parseXML(content : {
   metadata.points = metadata.points ?? 0;
   metadata.text = metadata.text ?? "";
 
-  if (content.rss !== undefined) {
+  if (content.rss !== undefined) { // Really Simple Syndication
+    const channel = content.rss.channel;
     switch (content.rss["@_version"]) {
       case '2.0':
-	const channel = content.rss.channel;
-	metadata.title = channel.title["#text"];
-	metadata.description = channel.description["#text"];
-	if (channel.language !== undefined) metadata.language = channel.language["#text"];
-	if (channel.image !== undefined) metadata.image = sanitizeURL(new URL(channel.image.url["#text"]));
+	metadata.title = channel.title["#text"].trim();
+	metadata.description = channel.description["#text"].trim();
+	if (channel.language !== undefined) metadata.language = channel.language["#text"].trim();
+	if (channel.image !== undefined) metadata.image = sanitizeURL(new URL(channel.image.url["#text"].trim()));
 
-	addToQueue(new URL(channel.link["#text"]));
-	if (channel.docs !== undefined) addToQueue(new URL(channel.docs["#text"]));
+	addToQueue(new URL(channel.link["#text"].trim()));
+	if (channel.docs !== undefined) addToQueue(new URL(channel.docs["#text"].trim()));
 
 	for (let category of channel.category ?? []) {
-	  metadata.keywords.push(category["#text"]);
+	  metadata.keywords.push(category["#text"].trim());
 	}
 
 	for (let item of channel.item ?? []) {
 	  if (item.title !== undefined) metadata.text += metadata.text.trim() === "" ? item.title["#text"].trim() : " " + item.title["#text"].trim();
 	  if (item.description !== undefined) metadata.text += metadata.text.trim() === "" ? item.description["#text"].trim() : " " + item.description["#text"].trim();
 	  
-	  if (item.link !== undefined) sanitizeURL(new URL(item.link["#text"].trim(), siteUrl));
+	  if (item.link !== undefined) addToQueue(new URL(item.link["#text"].trim(), siteUrl));
+	}
+	break;
+      case '0.91': // pass, because all valid 0.91 RSS is also valid 0.92 RSS
+      case '0.92':
+	metadata.title = channel.title["#text"].trim();
+	metadata.description = channel.description["#text"].trim();
+	if (channel.language !== undefined) metadata.language = channel.language["#text"].trim();
+	metadata.image = sanitizeURL(new URL(channel.image.url["#text"].trim()));
+
+	addToQueue(new URL(channel.link["#text"].trim()));
+	addToQueue(new URL(channel.image.link["#text"].trim()));
+	if (channel.docs !== undefined) addToQueue(new URL(channel.docs["#text"].trim()));
+
+	for (let item of channel.item ?? []) {
+	  if (item.title !== undefined) metadata.text += metadata.text.trim() === "" ? item.title["#text"].trim() : " " + item.title["#text"].trim();
+	  if (item.description !== undefined) metadata.text += metadata.text.trim() === "" ? item.description["#text"].trim() : " " + item.description["#text"].trim();
+
+	  if (item.link !== undefined) addToQueue(new URL(item.link["#text"].trim(), siteUrl));
 	}
 	break;
       default:
@@ -671,15 +689,15 @@ while (crawlQueue.length > 0) {
   };
 
   if (siteUrl.protocol === "http:") {
-	let newSiteUrl = new URL(siteUrl.href);
-	newSiteUrl.protocol = "https:";
+    let newSiteUrl = new URL(siteUrl.href);
+    newSiteUrl.protocol = "https:";
 
-	const originHttps = new URL("https://" + siteUrl.host + "/");
-	if (siteMeta.has(originHttps)) {
-		addToQueue(newSiteUrl);
-		continue;
-	}
-	try {
+    const originHttps = new URL(newSiteUrl.origin);
+    if (siteMeta.has(originHttps)) {
+      addToQueue(newSiteUrl);
+      continue;
+    }
+    try {
       const res = await fetch(newSiteUrl.href, fetchOptions);
 
       if (!res.ok) throw new Error(`HTTP Error ${res.status}: ${res.statusText}`);
@@ -691,19 +709,28 @@ while (crawlQueue.length > 0) {
     }
   }
 
-  /*
   if (!sitemaps.includes(siteUrl.origin)) {
+    const startTime = Date.now();
     console.log("Adding links from sitemap.");
+    let links : Array<string> = [];
     for (let url of info.sitemap) {
-      addToQueue(new URL(url.url));
+      const globLink = sanitizeURL(new URL(url.url));
+      if (links.includes(globLink.href)) continue;
+      links.push(globLink.href);
+      
       for (let language of url.languages ?? []) {
-		addToQueue(new URL(language[1]));
+      const langLink = sanitizeURL(new URL(language[1]));
+	if (links.includes(langLink.href)) continue;
+	links.push(langLink.href);
       }
     }
 
+    for (let link of links) addToQueue(new URL(link));
+    
+    console.log(`Added links from sitemap. Time taken: ${(Date.now() - startTime) / 1000} s`);
+
     sitemaps.push(siteUrl.origin);
   }
-  */
 
   let res;
   let contentType : string;
@@ -774,6 +801,16 @@ while (crawlQueue.length > 0) {
 	};
 	parser = new XMLParser(parserOptions);
 	metadata = parseXML(parser.parse(await res.text()), metadata, siteUrl);
+	break;
+      case 'text/turtle': //pass
+      case 'application/trig': // pass
+      case 'application/n-triples': // pass
+      case 'application/n-quads': // pass
+      case 'application/ld+json': // pass
+      case 'application/text/n3': // pass
+      case 'application/rdf+xml': // pass
+      case 'application/json':
+	console.error("RDF");
 	break;
       default:
 	console.error("Unknown document type");
