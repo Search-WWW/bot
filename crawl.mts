@@ -2,7 +2,7 @@ import { getInfo } from './getInfo.mjs';
 import { globalHeaders, config } from './global.mjs';
 import { matchRobots } from './robots.mjs';
 import { httpHeaderParse } from './httpHeaderParse.mjs';
-import { XMLParser, XMLValidator } from 'fast-xml-parser';
+import { XMLParser, XMLValidator, X2jOptions } from 'fast-xml-parser';
 import { Queue } from './queue.js';
 import { URL } from 'node:url';
 
@@ -748,58 +748,52 @@ while (crawlQueue.length > 0) {
     continue;
   }
   try {
-    let parserOptions;
+    let parserOptions : X2jOptions = {
+      allowBooleanAttributes: true,
+      alwaysCreateTextNode: true,
+      attributeNamePrefix: "@_",
+      ignoreDeclaration: true,
+      ignorePiTags: true,
+      parseAttributeValue: true,
+      parseTagValue: true,
+      ignoreAttributes: false,
+      processEntities: true
+    };
     let parser;
     switch (contentType) {
       case 'text/html': // pass
       case 'application/xhtml+xml':
-	parserOptions = {
-	  allowBooleanAttributes: true,
-	  alwaysCreateTextNode: true,
-	  attributeNamePrefix: "@_",
-	  htmlEntities: true,
-	  ignoreDeclaration: true,
-	  ignorePiTags: true,
-	  parseAttributeValue: true,
-	  parseTagValue: true,
-	  ignoreAttributes: false,
-	  unpairedTags: ["hr", "br", "link", "meta"],
-	  stopNodes : [ "*.pre", "*.script"],
-	  processEntities: true,
-	  isArray: (name : string, jpath : string, isLeafNode : boolean, isAttribute : boolean) => {
-	    if (isAttribute) return false;
-	    if (name === "html" || name === "head" || name === "body") return false;
-	    if (name === "meta" || name === "link") return true;
-	    if (jpath.startsWith("html.body")) return true;
-	    return false;
-	  }
+	parserOptions.htmlEntities = true;
+	parserOptions.unpairedTags = ["hr", "br", "link", "meta"];
+	parserOptions.stopNodes = [ "*.pre", "*.script"];
+	parserOptions.isArray = (name : string, jpath : string, isLeafNode : boolean, isAttribute : boolean) => {
+	  if (isAttribute) return false;
+	  if (name === "html" || name === "head" || name === "body") return false;
+	  if (name === "meta" || name === "link") return true;
+	  if (jpath.startsWith("html.body")) return true;
+	  return false;
 	};
+	
 	parser = new XMLParser(parserOptions);
+	
 	metadata = parseHTML(parser.parse(await res.text()), metadata, siteUrl);
 	break;
       case 'application/rss+xml': // pass
       case 'application/atom+xml': // pass
       case 'text/xml': // pass
       case 'application/xml':
-	parserOptions = {
-	  allowBooleanAttributes: true,
-	  alwaysCreateTextNode: true,
-	  attributeNamePrefix: "@_",
-	  ignoreDeclaration: true,
-	  ignorePiTags: true,
-	  parseAttributeValue: false,
-	  parseTagValue: false,
-	  ignoreAttributes: false,
-	  processEntities: true,
-	  isArray: (name : string, jpath : string, isLeafNode : boolean, isAttribute : boolean) => {
-	    if (isAttribute) return false;
-	    if (name === "rss" || name === "channel" || name === "category") return false;
-	    if (name === "item" || name === "entry") return true;
-	    if (jpath.startsWith("feed") && jpath.endsWith("link")) return true;
-	    return false;
-	  }
+	parserOptions.parseAttributeValue = false;
+	parserOptions.parseTagValue = false;
+	parserOptions.isArray = (name : string, jpath : string, isLeafNode : boolean, isAttribute : boolean) => {
+	  if (isAttribute) return false;
+	  if (name === "rss" || name === "channel" || name === "category") return false;
+	  if (name === "item" || name === "entry") return true;
+	  if (jpath.startsWith("feed") && jpath.endsWith("link")) return true;
+	  return false;
 	};
+	
 	parser = new XMLParser(parserOptions);
+	
 	metadata = parseXML(parser.parse(await res.text()), metadata, siteUrl);
 	break;
       case 'text/turtle': //pass
